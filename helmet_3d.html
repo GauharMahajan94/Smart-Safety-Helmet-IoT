@@ -1,0 +1,315 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>3D Smart Safety Worker</title>
+
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+          }
+        }
+    </script>
+
+    <style>
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            background: #101827;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        #viewer {
+            width: 100%;
+            height: 390px;
+            cursor: grab;
+        }
+
+        #viewer:active { cursor: grabbing; }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            padding: 12px;
+        }
+
+        button {
+            background: #26364d;
+            color: white;
+            border: 1px solid #475569;
+            border-radius: 8px;
+            padding: 10px 13px;
+            cursor: pointer;
+        }
+
+        button:hover { background: #385273; }
+
+        #alert {
+            margin: 8px 12px 14px;
+            padding: 13px;
+            border-radius: 8px;
+            text-align: center;
+            background: #174d45;
+            color: #d1fae5;
+            font-weight: bold;
+        }
+
+        .hint {
+            text-align: center;
+            color: #94a3b8;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="viewer"></div>
+
+<div class="hint">
+    Drag to rotate the worker • Scroll to zoom
+</div>
+
+<div class="controls">
+    <button id="wear">Wear Helmet</button>
+    <button id="remove">Remove Helmet</button>
+    <button id="left">Tilt Left</button>
+    <button id="right">Tilt Right</button>
+    <button id="fall">Simulate Fall</button>
+    <button id="reset">Reset Worker</button>
+</div>
+
+<div id="alert">NORMAL: Worker is wearing the helmet.</div>
+
+<script type="module">
+    import * as THREE from "three";
+
+    const container = document.getElementById("viewer");
+    const alertBox = document.getElementById("alert");
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color("#101827");
+
+    const camera = new THREE.PerspectiveCamera(
+        45,
+        container.clientWidth / container.clientHeight,
+        0.1,
+        100
+    );
+
+    camera.position.set(0, 1.4, 7);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 1.7));
+
+    const light = new THREE.DirectionalLight(0xffffff, 2.2);
+    light.position.set(4, 6, 5);
+    scene.add(light);
+
+    const worker = new THREE.Group();
+    scene.add(worker);
+
+    const skin = new THREE.MeshStandardMaterial({ color: "#d69b72" });
+    const shirt = new THREE.MeshStandardMaterial({ color: "#2563eb" });
+    const dark = new THREE.MeshStandardMaterial({ color: "#26364d" });
+    const helmetMaterial = new THREE.MeshStandardMaterial({
+        color: "#facc15",
+        roughness: 0.4
+    });
+
+    function addShape(parent, geometry, material, position, scale) {
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(...position);
+        if (scale) mesh.scale.set(...scale);
+        parent.add(mesh);
+        return mesh;
+    }
+
+    // Body
+    addShape(worker, new THREE.CylinderGeometry(0.48, 0.58, 1.25, 32),
+        shirt, [0, -0.55, 0]);
+
+    // Neck
+    addShape(worker, new THREE.CylinderGeometry(0.16, 0.18, 0.25, 24),
+        skin, [0, 0.16, 0]);
+
+    // Head group
+    const head = new THREE.Group();
+    head.position.y = 0.72;
+    worker.add(head);
+
+    // Head
+    addShape(head, new THREE.SphereGeometry(0.48, 32, 32),
+        skin, [0, 0, 0], [0.82, 1.05, 0.85]);
+
+    // Eyes
+    const eyeMaterial = new THREE.MeshStandardMaterial({ color: "#111827" });
+
+    addShape(head, new THREE.SphereGeometry(0.045, 16, 16),
+        eyeMaterial, [-0.15, 0.08, 0.39]);
+
+    addShape(head, new THREE.SphereGeometry(0.045, 16, 16),
+        eyeMaterial, [0.15, 0.08, 0.39]);
+
+    // Nose
+    addShape(head, new THREE.SphereGeometry(0.07, 16, 16),
+        skin, [0, -0.06, 0.42]);
+
+    // Helmet group
+    const helmet = new THREE.Group();
+    head.add(helmet);
+    helmet.position.y = 0.43;
+
+    // Helmet dome
+    addShape(helmet,
+        new THREE.SphereGeometry(0.57, 40, 24, 0, Math.PI * 2, 0, Math.PI / 2),
+        helmetMaterial, [0, 0.08, 0], [1, 0.85, 0.9]);
+
+    // Helmet brim
+    addShape(helmet,
+        new THREE.CylinderGeometry(0.67, 0.67, 0.08, 48),
+        helmetMaterial, [0, 0.05, 0], [1, 1, 0.9]);
+
+    // Helmet front peak
+    addShape(helmet,
+        new THREE.BoxGeometry(0.8, 0.07, 0.25),
+        helmetMaterial, [0, 0.04, 0.53]);
+
+    // Ground grid
+    const grid = new THREE.GridHelper(10, 20, "#334155", "#1e293b");
+    grid.position.y = -1.25;
+    scene.add(grid);
+
+    // State
+    let isHelmetOn = true;
+    let currentAction = "normal";
+
+    function showAlert(message, type) {
+        alertBox.textContent = message;
+
+        const styles = {
+            normal: ["#174d45", "#d1fae5"],
+            caution: ["#713f12", "#fef3c7"],
+            emergency: ["#7f1d1d", "#fee2e2"]
+        };
+
+        const selected = styles[type];
+        alertBox.style.background = selected[0];
+        alertBox.style.color = selected[1];
+    }
+
+    function setNormal() {
+        currentAction = "normal";
+        worker.rotation.set(0, 0, 0);
+        worker.position.set(0, 0, 0);
+        helmet.visible = true;
+        isHelmetOn = true;
+        showAlert("NORMAL: Worker is wearing the helmet.", "normal");
+    }
+
+    document.getElementById("remove").onclick = () => {
+        helmet.visible = false;
+        isHelmetOn = false;
+        currentAction = "removed";
+        worker.rotation.set(0, 0, 0);
+        showAlert("ALERT: HELMET REMOVED!", "caution");
+    };
+
+    document.getElementById("wear").onclick = () => {
+        helmet.visible = true;
+        isHelmetOn = true;
+        currentAction = "normal";
+        worker.rotation.set(0, 0, 0);
+        showAlert("NORMAL: HELMET WORN.", "normal");
+    };
+
+    document.getElementById("left").onclick = () => {
+        currentAction = "tilt";
+        worker.rotation.set(0, 0, 0.55);
+        showAlert("CAUTION: Worker tilted to the left.", "caution");
+    };
+
+    document.getElementById("right").onclick = () => {
+        currentAction = "tilt";
+        worker.rotation.set(0, 0, -0.55);
+        showAlert("CAUTION: Worker tilted to the right.", "caution");
+    };
+
+    document.getElementById("fall").onclick = () => {
+        currentAction = "fall";
+        worker.rotation.set(0, 0, Math.PI / 2);
+        worker.position.y = -0.45;
+        showAlert("EMERGENCY: POSSIBLE WORKER FALL DETECTED!", "emergency");
+    };
+
+    document.getElementById("reset").onclick = () => {
+        setNormal();
+    };
+
+    setNormal();
+
+    // Mouse rotation
+    let dragging = false;
+    let previousX = 0;
+    let previousY = 0;
+
+    container.addEventListener("pointerdown", event => {
+        dragging = true;
+        previousX = event.clientX;
+        previousY = event.clientY;
+        container.setPointerCapture(event.pointerId);
+    });
+
+    container.addEventListener("pointermove", event => {
+        if (!dragging) return;
+
+        const dx = event.clientX - previousX;
+        const dy = event.clientY - previousY;
+
+        worker.rotation.y += dx * 0.01;
+        worker.rotation.x += dy * 0.01;
+
+        worker.rotation.x = THREE.MathUtils.clamp(
+            worker.rotation.x, -1.0, 1.0
+        );
+
+        previousX = event.clientX;
+        previousY = event.clientY;
+    });
+
+    container.addEventListener("pointerup", () => {
+        dragging = false;
+    });
+
+    container.addEventListener("wheel", event => {
+        camera.position.z += event.deltaY * 0.005;
+        camera.position.z = THREE.MathUtils.clamp(
+            camera.position.z, 3.5, 10
+        );
+    });
+
+    function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener("resize", () => {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+</script>
+
+</body>
+</html>

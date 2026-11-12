@@ -1,0 +1,34 @@
+
+# IntelliJ IDEA
+.idea/
+*.iml
+/shelf/
+/workspace.xml
+/markdown.xml
+/httpRequests/
+/queries/
+/dataSources/
+/dataSources.local.xml
+
+# Python virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node.js
+node_modules/
+
+# Local database
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Environment variables and secrets
+.env
+.streamlit/secrets.toml
+
+# Operating system files
+.DS_Store
+Thumbs.db
